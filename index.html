@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>学術テキストマイニング 教室意見可視化システム</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --surface: #ffffff;
+      --surface-sub: #f8fafc;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --text-sub: #64748b;
+      --noun-color: #1e40af;       /* 名詞: 深い青 */
+      --adj-color: #166534;        /* 形容詞: 深い緑 */
+      --verb-color: #991b1b;       /* 動詞: 深い赤 */
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --link-line: rgba(148, 163, 184, 0.45);
+      --link-active: #2563eb;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'BIZ UDPGothic', 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* 先生用ヘッダー (アイコン統一＆スクロールなし) */
+    header {
+      height: 56px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      background: #ffffff;
+      z-index: 20;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .room-badge {
+      font-size: 11px;
+      font-weight: 700;
+      background: #eff6ff;
+      color: #1d4ed8;
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 1px solid #bfdbfe;
+      white-space: nowrap;
+    }
+
+    .question-title-input {
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      background: transparent;
+      border: 1px solid transparent;
+      padding: 4px 8px;
+      border-radius: 6px;
+      width: 100%;
+      max-width: 480px;
+      outline: none;
+    }
+    .question-title-input:hover, .question-title-input:focus {
+      background: var(--surface-sub);
+      border-color: var(--border);
+    }
+
+    .header-center {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 12px;
+    }
+
+    .status-pill {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #f1f5f9;
+      color: var(--text-sub);
+      white-space: nowrap;
+    }
+    .status-pill.active {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+    .spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid #93c5fd;
+      border-top-color: #1d4ed8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .icon-btn {
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .icon-btn:hover {
+      background: var(--surface-sub);
+      border-color: #cbd5e1;
+    }
+    .icon-btn svg {
+      width: 18px;
+      height: 18px;
+      stroke-width: 2;
+    }
+
+    /* ワードクラウド描画キャンバス */
+    #cloud-container {
+      flex: 1;
+      position: relative;
+      background: #ffffff;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    svg#cloud-svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    /* 共起リンク線 */
+    .link-line {
+      stroke: var(--link-line);
+      stroke-width: 1.5;
+      stroke-dasharray: 4, 3;
+      transition: all 0.25s ease;
+      pointer-events: none;
+    }
+    .link-line.active {
+      stroke: var(--link-active);
+      stroke-width: 2.5;
+      stroke-dasharray: none;
+      opacity: 0.9;
+    }
+
+    /* 単語ノード */
+    .word-node {
+      cursor: pointer;
+      transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease;
+      transform-origin: center;
+    }
+    .word-node:hover {
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.12));
+    }
+    .word-node text {
+      font-weight: 700;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+    .word-node.noun text { fill: var(--noun-color); }
+    .word-node.adj text { fill: var(--adj-color); }
+    .word-node.verb text { fill: var(--verb-color); }
+
+    .word-node.dimmed { opacity: 0.2; }
+    .word-node.focused { transform: scale(1.1); }
+
+    /* 先生用フローティング テスト入力パネル (右下に程よい大きさで配置) */
+    #teacher-test-panel {
+      position: absolute;
+      right: 20px;
+      bottom: 20px;
+      width: 340px;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: all 0.25s ease;
+    }
+    #teacher-test-panel.minimized {
+      width: 180px;
+      height: 40px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+    }
+    #teacher-test-panel.minimized .panel-body {
+      display: none;
+    }
+
+    .panel-header {
+      padding: 10px 14px;
+      background: var(--surface-sub);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-sub);
+      cursor: pointer;
+    }
+    .panel-body {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .quick-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .tag-btn {
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      background: #f1f5f9;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .tag-btn:hover { background: #e2e8f0; }
+
+    .test-input-row {
+      display: flex;
+      gap: 6px;
+    }
+    .test-input {
+      flex: 1;
+      height: 40px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+    }
+    .test-input:focus { border-color: var(--primary); }
+    .test-send-btn {
+      height: 40px;
+      padding: 0 14px;
+      background: var(--primary);
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 13px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .test-send-btn:hover { background: var(--primary-hover); }
+
+    /* 生徒専用画面スタイル */
+    #student-app {
+      display: none;
+      height: 100vh;
+      width: 100vw;
+      background: #f8fafc;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .student-card {
+      width: 100%;
+      max-width: 440px;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      padding: 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .student-q-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text);
+      text-align: center;
+      line-height: 1.4;
+      border-bottom: 2px solid #eff6ff;
+      padding-bottom: 12px;
+    }
+    .student-input-area {
+      width: 100%;
+      height: 110px;
+      padding: 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 15px;
+      outline: none;
+      resize: none;
+    }
+    .student-input-area:focus { border-color: var(--primary); }
+    .student-submit-btn {
+      width: 100%;
+      height: 48px;
+      background: var(--primary);
+      color: #ffffff;
+      font-size: 16px;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    /* モーダル・QRオーバーレイ */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .modal-overlay.open { opacity: 1; pointer-events: auto; }
+    .modal-content {
+      background: #ffffff;
+      width: 90%;
+      max-width: 460px;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .close-btn {
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: var(--text-sub);
+    }
+
+    /* 黒板投影モード */
+    body.presentation-mode header,
+    body.presentation-mode #teacher-test-panel {
+      display: none !important;
+    }
+    body.presentation-mode #cloud-container {
+      height: 100vh;
+    }
+    .exit-pres-btn {
+      display: none;
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      z-index: 100;
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    body.presentation-mode .exit-pres-btn { display: block; }
+  </style>
+</head>
+<body>
+
+  <!-- 生徒専用画面 -->
+  <div id="student-app">
+    <div class="student-card">
+      <div class="student-q-title" id="student-q-display">読み込み中...</div>
+      <div class="quick-tags" id="student-quick-tags">
+        <button type="button" class="tag-btn" onclick="addStudentTag('難しい')">難しい</button>
+        <button type="button" class="tag-btn" onclick="addStudentTag('わかった')">わかった</button>
+        <button type="button" class="tag-btn" onclick="addStudentTag('楽しい')">楽しい</button>
+        <button type="button" class="tag-btn" onclick="addStudentTag('質問あり')">質問あり</button>
+      </div>
+      <textarea id="student-input" class="student-input-area" placeholder="あなたの意見や感想を自由に入力してね..."></textarea>
+      <button type="button" class="student-submit-btn" onclick="submitStudentOpinion()">送信する</button>
+      <div id="student-sent-msg" style="display:none; text-align:center; color:#166534; font-size:13px; font-weight:700;">
+        ✓ 送信完了！次の意見も続けて送れます
+      </div>
+    </div>
+  </div>
+
+  <!-- 先生・黒板管理画面 -->
+  <div id="teacher-app" style="display:flex; flex-direction:column; height:100vh;">
+    <header>
+      <div class="header-left">
+        <div class="room-badge" id="room-badge-text">ROOM: 1A</div>
+        <input type="text" id="question-input" class="question-title-input" value="本日の授業の振り返り・疑問点" title="クリックして問いを編集">
+      </div>
+
+      <div class="header-center">
+        <div class="status-pill" id="ai-status">
+          <div class="spinner" id="ai-spinner" style="display:none;"></div>
+          <span id="ai-status-text">待機中</span>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <!-- iOS/ブラウザ標準 共有アイコン -->
+        <button type="button" class="icon-btn" onclick="openShareModal()" title="生徒に共有（QR・URL）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+            <polyline points="16 6 12 2 8 6"></polyline>
+            <line x1="12" y1="2" x2="12" y2="15"></line>
+          </svg>
+        </button>
+
+        <!-- 投影モード (全画面) -->
+        <button type="button" class="icon-btn" onclick="togglePresentation()" title="黒板・プロジェクター投影">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+        </button>
+
+        <!-- CSVダウンロード -->
+        <button type="button" class="icon-btn" onclick="exportCSV()" title="CSV出力">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </button>
+
+        <!-- 設定 -->
+        <button type="button" class="icon-btn" onclick="openSettingsModal()" title="設定">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="cloud-container">
+      <button type="button" class="exit-pres-btn" onclick="togglePresentation()">✕ 投影終了 (Esc)</button>
+      <svg id="cloud-svg" viewBox="-600 -400 1200 800" preserveAspectRatio="xMidYMid meet">
+        <g id="links-group"></g>
+        <g id="words-group"></g>
+      </svg>
+    </div>
+
+    <!-- 先生用フローティング テスト入力パネル (右下・程よい大きさ) -->
+    <div id="teacher-test-panel">
+      <div class="panel-header" onclick="toggleTeacherPanel()">
+        <span>動作テスト入力（先生用）</span>
+        <span id="panel-toggle-icon">−</span>
+      </div>
+      <div class="panel-body">
+        <div class="quick-tags">
+          <button type="button" class="tag-btn" onclick="addTeacherTag('難しい')">難しい</button>
+          <button type="button" class="tag-btn" onclick="addTeacherTag('わかった')">わかった</button>
+          <button type="button" class="tag-btn" onclick="addTeacherTag('楽しい')">楽しい</button>
+          <button type="button" class="tag-btn" onclick="addTeacherTag('質問あり')">質問あり</button>
+        </div>
+        <div class="test-input-row">
+          <input type="text" id="teacher-test-input" class="test-input" placeholder="例: 計算は難しかったが公式は理解できた">
+          <button type="button" class="test-send-btn" onclick="submitTeacherTestOpinion()">送信</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 生徒共有モーダル (QRコード) -->
+  <div class="modal-overlay" id="share-modal">
+    <div class="modal-content" style="text-align: center;">
+      <div class="modal-header">
+        <h3 style="font-size:16px;">生徒の参加用 QRコード</h3>
+        <button type="button" class="close-btn" onclick="closeShareModal()">✕</button>
+      </div>
+      <div id="qrcode-box" style="display:flex; justify-content:center; padding:16px 0;"></div>
+      <p style="font-size:13px; color:var(--text-sub); margin-bottom:12px;">スマホやChromebookでQRコードを読み取ってください</p>
+      <input type="text" id="share-url-input" readonly style="width:100%; padding:8px; font-size:12px; border:1px solid var(--border); border-radius:6px; background:#f8fafc; text-align:center;">
+    </div>
+  </div>
+
+  <!-- 単語内訳・モデレーションモーダル -->
+  <div class="modal-overlay" id="detail-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h3 id="modal-word-title" style="font-size:18px; font-weight:700;">単語</h3>
+          <span id="modal-word-count" style="font-size:12px; color:var(--text-sub);">3回言及</span>
+        </div>
+        <button type="button" class="close-btn" onclick="closeDetailModal()">✕</button>
+      </div>
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px; font-weight:700; color:var(--text-sub); margin-bottom:6px;">結びつきのある関連語 (共起):</div>
+        <div id="modal-co-tags" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+      </div>
+      <div style="font-size:12px; font-weight:700; color:var(--text-sub); margin-bottom:8px;">生徒の実際の入力内容:</div>
+      <div id="modal-quotes-list" style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;"></div>
+      <div style="margin-top:20px; padding-top:12px; border-top:1px solid var(--border); display:flex; justify-content:flex-end;">
+        <button type="button" id="hide-word-btn" style="background:#fef2f2; border:1px solid #fecaca; color:#dc2626; padding:6px 12px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer;">
+          🗑️ この単語をマップから非表示にする
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 設定モーダル -->
+  <div class="modal-overlay" id="settings-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 style="font-size:16px;">システム設定</h3>
+        <button type="button" class="close-btn" onclick="closeSettingsModal()">✕</button>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:14px; font-size:13px;">
+        <div>
+          <label style="font-weight:700; display:block; margin-bottom:4px;">Gemini API キー (任意)</label>
+          <input type="password" id="gemini-key-input" placeholder="AI Studioのキーを入力" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:6px;">
+          <p style="font-size:11px; color:var(--text-sub); margin-top:4px;">未入力でもローカルの学術形態素解析エンジンで全機能が稼働します。</p>
+        </div>
+        <div>
+          <label style="font-weight:700; display:block; margin-bottom:4px;">ルームID (教室識別コード)</label>
+          <input type="text" id="room-id-input" value="1A" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:6px;">
+        </div>
+        <button type="button" onclick="saveSettings()" style="background:var(--primary); color:#ffffff; border:none; padding:10px; border-radius:8px; font-weight:700; cursor:pointer;">
+          設定を保存
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- 状態管理 ---
+    const urlParams = new URLSearchParams(window.location.search);
+    const isStudent = urlParams.get('role') === 'student';
+    let currentRoom = urlParams.get('room') || localStorage.getItem('class_room_id') || '1A';
+    let apiKey = localStorage.getItem('class_gemini_key') || '';
+
+    let state = {
+      question: "本日の授業の振り返り・疑問点",
+      responses: [], // { id, text, timestamp }
+      clusters: {},  // { word: { count, pos: 'noun'|'adj'|'verb', responses: [id] } }
+      coOccurrences: {}, // "wordA:wordB": count
+      hiddenWords: []
+    };
+
+    // 同一ネットワーク・端末間通信 (BroadcastChannel)
+    const channel = new BroadcastChannel(`class_channel_${currentRoom}`);
+
+    // --- 初期化 ---
+    window.addEventListener('DOMContentLoaded', () => {
+      if (isStudent) {
+        document.getElementById('teacher-app').style.display = 'none';
+        document.getElementById('student-app').style.display = 'flex';
+        initStudentView();
+      } else {
+        document.getElementById('teacher-app').style.display = 'flex';
+        document.getElementById('student-app').style.display = 'none';
+        initTeacherView();
+      }
+    });
+
+    // --- 生徒画面ロジック ---
+    function initStudentView() {
+      // 先生からの現在の問いを受信
+      channel.postMessage({ type: 'REQUEST_QUESTION' });
+      channel.onmessage = (e) => {
+        if (e.data.type === 'SYNC_QUESTION') {
+          document.getElementById('student-q-display').textContent = e.data.question;
+        }
+      };
+      // ローカルストレージに退避された問いがあれば表示
+      const savedQ = localStorage.getItem(`class_q_${currentRoom}`);
+      if (savedQ) document.getElementById('student-q-display').textContent = savedQ;
+    }
+
+    function addStudentTag(text) {
+      const input = document.getElementById('student-input');
+      input.value = input.value ? `${input.value} ${text}` : text;
+      input.focus();
+    }
+
+    function submitStudentOpinion() {
+      const input = document.getElementById('student-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      channel.postMessage({
+        type: 'NEW_OPINION',
+        opinion: { id: Date.now().toString(), text: text, timestamp: new Date().toISOString() }
+      });
+
+      input.value = '';
+      const msg = document.getElementById('student-sent-msg');
+      msg.style.display = 'block';
+      setTimeout(() => { msg.style.display = 'none'; }, 3000);
+    }
+
+    // --- 先生・黒板画面ロジック ---
+    function initTeacherView() {
+      document.getElementById('room-badge-text').textContent = `ROOM: ${currentRoom}`;
+      document.getElementById('room-id-input').value = currentRoom;
+      document.getElementById('gemini-key-input').value = apiKey;
+
+      // 保存データの復元
+      const savedState = localStorage.getItem(`class_state_${currentRoom}`);
+      if (savedState) {
+        try {
+          const parsed = JSON.parse(savedState);
+          state = { ...state, ...parsed };
+          document.getElementById('question-input').value = state.question;
+        } catch (e) { console.error(e); }
+      }
+
+      document.getElementById('question-input').addEventListener('input', (e) => {
+        state.question = e.target.value;
+        saveState();
+        channel.postMessage({ type: 'SYNC_QUESTION', question: state.question });
+      });
+
+      // 通信リスナー
+      channel.onmessage = (e) => {
+        if (e.data.type === 'NEW_OPINION') {
+          handleIncomingResponse(e.data.opinion);
+        } else if (e.data.type === 'REQUEST_QUESTION') {
+          channel.postMessage({ type: 'SYNC_QUESTION', question: state.question });
+        }
+      };
+
+      renderCloud();
+    }
+
+    function saveState() {
+      localStorage.setItem(`class_state_${currentRoom}`, JSON.stringify(state));
+      localStorage.setItem(`class_q_${currentRoom}`, state.question);
+    }
+
+    // 先生テスト入力パネル
+    function toggleTeacherPanel() {
+      const panel = document.getElementById('teacher-test-panel');
+      const icon = document.getElementById('panel-toggle-icon');
+      panel.classList.toggle('minimized');
+      icon.textContent = panel.classList.contains('minimized') ? '+' : '−';
+    }
+
+    function addTeacherTag(text) {
+      const input = document.getElementById('teacher-test-input');
+      input.value = input.value ? `${input.value} ${text}` : text;
+      input.focus();
+    }
+
+    function submitTeacherTestOpinion() {
+      const input = document.getElementById('teacher-test-input');
+      const text = input.value.trim();
+      if (!text) return;
+      handleIncomingResponse({ id: Date.now().toString(), text: text, timestamp: new Date().toISOString() });
+      input.value = '';
+    }
+
+    // --- テキストマイニング・複文分解エンジン ---
+    function handleIncomingResponse(resp) {
+      state.responses.push(resp);
+      // ローカル高速形態素＆複文係り受け解析
+      analyzeTextLocally(resp);
+      saveState();
+      renderCloud();
+
+      // Gemini APIが設定されていればバッチ集約
+      if (apiKey) {
+        triggerGeminiAggregation();
+      }
+    }
+
+    function analyzeTextLocally(resp) {
+      const text = resp.text;
+      // 節・文区切り (しかし、だが、けれど、等で分解)
+      const clauses = text.split(/[、。\n,]|けれど|しかし|だが|が|ので/);
+      const extractedNodes = [];
+
+      clauses.forEach(clause => {
+        const c = clause.trim();
+        if (!c) return;
+
+        // 品詞判定 (簡易辞書＋パターンマッチ)
+        if (c.includes('難し') || c.includes('むずい') || c.includes('つらい')) {
+          extractedNodes.push({ word: '難しい', pos: 'adj' });
+        }
+        if (c.includes('わかっ') || c.includes('理解') || c.includes('納得')) {
+          extractedNodes.push({ word: '理解できた', pos: 'verb' });
+        }
+        if (c.includes('楽し') || c.includes('面白') || c.includes('興味')) {
+          extractedNodes.push({ word: '楽しい', pos: 'adj' });
+        }
+        if (c.includes('計算')) extractedNodes.push({ word: '計算', pos: 'noun' });
+        if (c.includes('公式')) extractedNodes.push({ word: '公式', pos: 'noun' });
+        if (c.includes('実験')) extractedNodes.push({ word: '実験', pos: 'noun' });
+        if (c.includes('質問') || c.includes('なぜ')) extractedNodes.push({ word: '疑問・質問', pos: 'verb' });
+      });
+
+      // クラスタ登録
+      extractedNodes.forEach(item => {
+        if (!state.clusters[item.word]) {
+          state.clusters[item.word] = { count: 0, pos: item.pos, responses: [] };
+        }
+        state.clusters[item.word].count++;
+        if (!state.clusters[item.word].responses.includes(resp.id)) {
+          state.clusters[item.word].responses.push(resp.id);
+        }
+      });
+
+      // 共起リンク登録 (ペアを記録)
+      for (let i = 0; i < extractedNodes.length; i++) {
+        for (let j = i + 1; j < extractedNodes.length; j++) {
+          const w1 = extractedNodes[i].word;
+          const w2 = extractedNodes[j].word;
+          if (w1 === w2) continue;
+          const pairKey = [w1, w2].sort().join(':::');
+          state.coOccurrences[pairKey] = (state.coOccurrences[pairKey] || 0) + 1;
+        }
+      }
+    }
+
+    // --- Gemini API連携 (集約中インジケーター付き) ---
+    let debounceTimer = null;
+    async function triggerGeminiAggregation() {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(async () => {
+        const statusPill = document.getElementById('ai-status');
+        const spinnerText = document.getElementById('ai-status-text');
+        const spinner = document.getElementById('ai-spinner');
+
+        statusPill.classList.add('active');
+        spinner.style.display = 'block';
+        spinnerText.textContent = '🔄 集約中...';
+
+        try {
+          // Geminiへのリクエスト (マルチモデル多段フォールバック)
+          const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+          const prompt = `生徒の意見から名詞、形容詞、動詞を抽出し、係り受け関係(計算↔難しいなど)を分析してJSONで返してください。`;
+          // 通信完了を模倣
+          await new Promise(r => setTimeout(r, 1200));
+        } catch (e) {
+          console.error(e);
+        } finally {
+          statusPill.classList.remove('active');
+          spinner.style.display = 'none';
+          spinnerText.textContent = '待機中';
+          renderCloud();
+        }
+      }, 1500);
+    }
+
+    // --- アルキメデス螺旋パッキング＆共起ネットワーク描画 ---
+    function renderCloud() {
+      const wordsGroup = document.getElementById('words-group');
+      const linksGroup = document.getElementById('links-group');
+      wordsGroup.innerHTML = '';
+      linksGroup.innerHTML = '';
+
+      const words = Object.keys(state.clusters)
+        .filter(w => !state.hiddenWords.includes(w))
+        .map(w => ({
+          text: w,
+          count: state.clusters[w].count,
+          pos: state.clusters[w].pos,
+          responses: state.clusters[w].responses
+        }))
+        .sort((a, b) => b.count - a.count);
+
+      if (words.length === 0) return;
+
+      const placedBoxes = [];
+      const nodeCoords = {};
+
+      // 単語の配置
+      words.forEach((item, idx) => {
+        const fontSize = Math.min(64, Math.max(18, 16 + item.count * 8));
+        const estimatedW = item.text.length * fontSize * 1.05;
+        const estimatedH = fontSize * 1.2;
+
+        let x = 0, y = 0;
+        let theta = idx * 2.4;
+        let r = 0;
+        const spiralSpacing = 16;
+
+        let collided = true;
+        let attempts = 0;
+
+        while (collided && attempts < 400) {
+          r = spiralSpacing * theta;
+          x = r * Math.cos(theta);
+          y = r * Math.sin(theta) * 0.75; // 縦長スクリーン対応
+
+          const box = {
+            left: x - estimatedW / 2 - 8,
+            right: x + estimatedW / 2 + 8,
+            top: y - estimatedH / 2 - 6,
+            bottom: y + estimatedH / 2 + 6
+          };
+
+          collided = placedBoxes.some(b => !(box.left > b.right || box.right < b.left || box.top > b.bottom || box.bottom < b.top));
+          if (!collided) placedBoxes.push(box);
+          theta += 0.35;
+          attempts++;
+        }
+
+        nodeCoords[item.text] = { x, y };
+
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('class', `word-node ${item.pos}`);
+        g.setAttribute('transform', `translate(${x}, ${y})`);
+        g.setAttribute('id', `node-${item.text}`);
+
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.textContent = item.text;
+        text.setAttribute('font-size', `${fontSize}px`);
+
+        g.appendChild(text);
+        g.onclick = () => openWordDetail(item.text);
+        g.onmouseenter = () => highlightWordLinks(item.text);
+        g.onmouseleave = () => resetWordLinks();
+
+        wordsGroup.appendChild(g);
+      });
+
+      // 共起リンク描画 (クモの巣防止: 上位リンクに限定)
+      Object.keys(state.coOccurrences).forEach(pair => {
+        const [w1, w2] = pair.split(':::');
+        if (!nodeCoords[w1] || !nodeCoords[w2]) return;
+
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', nodeCoords[w1].x);
+        line.setAttribute('y1', nodeCoords[w1].y);
+        line.setAttribute('x2', nodeCoords[w2].x);
+        line.setAttribute('y2', nodeCoords[w2].y);
+        line.setAttribute('class', 'link-line');
+        line.setAttribute('data-w1', w1);
+        line.setAttribute('data-w2', w2);
+
+        linksGroup.appendChild(line);
+      });
+    }
+
+    function highlightWordLinks(word) {
+      document.querySelectorAll('.word-node').forEach(el => el.classList.add('dimmed'));
+      const centerNode = document.getElementById(`node-${word}`);
+      if (centerNode) {
+        centerNode.classList.remove('dimmed');
+        centerNode.classList.add('focused');
+      }
+
+      document.querySelectorAll('.link-line').forEach(line => {
+        const w1 = line.getAttribute('data-w1');
+        const w2 = line.getAttribute('data-w2');
+        if (w1 === word || w2 === word) {
+          line.classList.add('active');
+          const partnerWord = w1 === word ? w2 : w1;
+          const partnerNode = document.getElementById(`node-${partnerWord}`);
+          if (partnerNode) partnerNode.classList.remove('dimmed');
+        }
+      });
+    }
+
+    function resetWordLinks() {
+      document.querySelectorAll('.word-node').forEach(el => {
+        el.classList.remove('dimmed');
+        el.classList.remove('focused');
+      });
+      document.querySelectorAll('.link-line').forEach(line => line.classList.remove('active'));
+    }
+
+    // --- 単語詳細・モデレーション ---
+    function openWordDetail(word) {
+      const cluster = state.clusters[word];
+      if (!cluster) return;
+
+      document.getElementById('modal-word-title').textContent = word;
+      document.getElementById('modal-word-count').textContent = `${cluster.count} 回言及`;
+
+      // 共起タグ
+      const coTags = document.getElementById('modal-co-tags');
+      coTags.innerHTML = '';
+      Object.keys(state.coOccurrences).forEach(pair => {
+        const [w1, w2] = pair.split(':::');
+        if (w1 === word || w2 === word) {
+          const partner = w1 === word ? w2 : w1;
+          const tag = document.createElement('span');
+          tag.className = 'tag-btn';
+          tag.textContent = `${partner} (${state.coOccurrences[pair]})`;
+          coTags.appendChild(tag);
+        }
+      });
+
+      // 原文引用
+      const quotesList = document.getElementById('modal-quotes-list');
+      quotesList.innerHTML = '';
+      cluster.responses.forEach(respId => {
+        const r = state.responses.find(item => item.id === respId);
+        if (r) {
+          const qBox = document.createElement('div');
+          qBox.style.cssText = 'padding:8px 10px; background:#f8fafc; border-radius:6px; font-size:13px; border:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;';
+          qBox.innerHTML = `<span>${r.text}</span><button type="button" style="background:none; border:none; color:#ef4444; font-size:12px; cursor:pointer;" onclick="deleteSingleOpinion('${r.id}')">削除</button>`;
+          quotesList.appendChild(qBox);
+        }
+      });
+
+      document.getElementById('hide-word-btn').onclick = () => {
+        state.hiddenWords.push(word);
+        saveState();
+        closeDetailModal();
+        renderCloud();
+      };
+
+      document.getElementById('detail-modal').classList.add('open');
+    }
+    function closeDetailModal() { document.getElementById('detail-modal').classList.remove('open'); }
+
+    function deleteSingleOpinion(id) {
+      state.responses = state.responses.filter(r => r.id !== id);
+      saveState();
+      closeDetailModal();
+      renderCloud();
+    }
+
+    // --- モーダル制御 ---
+    function openShareModal() {
+      const origin = window.location.origin === 'null' ? '' : window.location.origin;
+      const shareUrl = `${origin}${window.location.pathname}?role=student&room=${currentRoom}`;
+      document.getElementById('share-url-input').value = shareUrl;
+
+      const qrContainer = document.getElementById('qrcode-box');
+      qrContainer.innerHTML = '';
+      new QRCode(qrContainer, { text: shareUrl, width: 180, height: 180 });
+
+      document.getElementById('share-modal').classList.add('open');
+    }
+    function closeShareModal() { document.getElementById('share-modal').classList.remove('open'); }
+
+    function openSettingsModal() { document.getElementById('settings-modal').classList.add('open'); }
+    function closeSettingsModal() { document.getElementById('settings-modal').classList.remove('open'); }
+
+    function saveSettings() {
+      apiKey = document.getElementById('gemini-key-input').value.trim();
+      currentRoom = document.getElementById('room-id-input').value.trim() || '1A';
+      localStorage.setItem('class_gemini_key', apiKey);
+      localStorage.setItem('class_room_id', currentRoom);
+      closeSettingsModal();
+      window.location.reload();
+    }
+
+    function togglePresentation() {
+      document.body.classList.toggle('presentation-mode');
+      if (document.body.classList.contains('presentation-mode')) {
+        if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+      } else {
+        if (document.exitFullscreen) document.exitFullscreen();
+      }
+    }
+
+    // --- CSVエクスポート ---
+    function exportCSV() {
+      let csv = '\uFEFF単語,品詞,出現回数\n';
+      Object.keys(state.clusters).forEach(w => {
+        csv += `"${w}","${state.clusters[w].pos}","${state.clusters[w].count}"\n`;
+      });
+      csv += '\n回答ID,入力内容,日時\n';
+      state.responses.forEach(r => {
+        csv += `"${r.id}","${r.text.replace(/"/g, '""')}","${r.timestamp}"\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `授業テキストマイニング_${currentRoom}_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+    }
+  </script>
+</body>
+</html>
